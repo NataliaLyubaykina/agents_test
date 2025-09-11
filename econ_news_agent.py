@@ -1,16 +1,18 @@
 """
 econ_news_agent.py — RSS-based daily economics/finance digest with hybrid topics and GPT summary.
 
-This module deliberately avoids hard-coding FEEDS / LOCAL_TZ / OPENAI_MODEL.
-Pass them in when constructing EconNewsAgent.
+No globals are hard-coded. Pass everything in via run():
+    run(date_str, feeds, local_tz, model, use_rss_threshold=0.4, max_k=6)
+Returns:
+    (df: pandas.DataFrame, gpt_summary: Optional[str])
 
-- feeds: list[str] of RSS/Atom feed URLs (required)
-- local_tz: dateutil.tz timezone object (defaults to UTC if not provided)
-- model: OpenAI model name for summaries (defaults to "gpt-4o-mini" if not provided)
+Exported symbols (for `from econ_news_agent import *`):
+    run, normalize_datetime, same_calendar_day, fetch_feed_entries,
+    entries_to_dataframe, hybrid_topics, short_bullet_summary,
+    gpt_daily_summary, rss_vs_ml_confusion
 """
 
 import os
-from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple, List
 from datetime import datetime
 
@@ -22,13 +24,12 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 
 __all__ = [
-    "EconNewsAgent", "DigestResult",
+    "run",
     "normalize_datetime", "same_calendar_day",
     "fetch_feed_entries", "entries_to_dataframe",
     "hybrid_topics", "short_bullet_summary",
     "gpt_daily_summary", "rss_vs_ml_confusion",
 ]
-
 
 # ----------------- HELPERS -----------------
 
@@ -90,17 +91,13 @@ def entries_to_dataframe(entries: list, target_date_local: datetime, local_tz) -
     df = pd.DataFrame(filtered)
     if df.empty:
         return df
-    # For convenience columns
+    # Convenience columns
     df["published_local"] = df["published_dt_utc"].apply(lambda d: d.astimezone(local_tz) if pd.notnull(d) else None)
-    # Consolidate preview text for clustering
     df["text_for_cluster"] = (df["title"].fillna("") + " — " + df["summary"].fillna("")).str.strip()
-    # Add a simple “source” column from the link’s netloc
     df["source"] = df["link"].apply(lambda u: u.split("/")[2] if isinstance(u, str) and "://" in u else "")
-    # Make a printable categories string (if present)
     df["categories"] = df["tags"].apply(lambda ts: ", ".join(ts) if isinstance(ts, list) and ts else "")
-    # Order columns
-    cols = ["published_local", "title", "link", "publisher", "source", "categories", "summary",
-            "tags", "published_dt_utc", "text_for_cluster"]
+    cols = ["published_local", "title", "link", "publisher", "source", "categories",
+            "summary", "tags", "published_dt_utc", "text_for_cluster"]
     df = df[cols]
     df = df.sort_values("published_local")
     return df
@@ -111,14 +108,9 @@ def hybrid_topics(df: pd.DataFrame, max_k: int = 6, use_rss_threshold: float = 0
     Keep RSS categories and also compute KMeans clusters on TF-IDF.
 
     Adds columns:
-      - rss_topic           (str): first RSS category (or "Uncategorized")
-      - rss_topic_count     (int): frequency of that rss_topic in the day
-      - ml_cluster_id       (int): KMeans cluster id
-      - ml_topic            (str): short label from top TF-IDF terms for that cluster
-      - ml_topic_count      (int): frequency of that ml_topic in the day
-      - ml_strength         (float): closeness to centroid (higher ~ more central)
-      - topic               (str): “hybrid” display label (prefers RSS if prevalent)
-
+      - rss_topic, rss_topic_count
+      - ml_cluster_id, ml_topic, ml_topic_count, ml_strength
+      - topic  (hybrid display label: prefers RSS if prevalent)
     Returns: df, {"rss_labels": {...}, "ml_labels": {...}}
     """
     if df.empty:
@@ -141,7 +133,6 @@ def hybrid_topics(df: pd.DataFrame, max_k: int = 6, use_rss_threshold: float = 0
 
     # --- 2) TF-IDF + KMeans -> ml_cluster_id / ml_topic (+ strength)
     texts = df["text_for_cluster"].fillna("").tolist()
-
     vectorizer = TfidfVectorizer(max_features=4000, ngram_range=(1, 2), stop_words="english")
     X = vectorizer.fit_transform(texts)
 
@@ -204,12 +195,13 @@ def short_bullet_summary(df: pd.DataFrame, topic_column: str = "topic") -> str:
     return "\n".join(lines)
 
 
-def gpt_daily_summary(df: pd.DataFrame, date_local: datetime, model: str) -> str:
+def gpt_daily_summary(df: pd.DataFrame, date_local: datetime, model: str) -> Optional[str]:
     """Ask GPT for a super-brief daily market summary based on the DataFrame."""
     if df.empty:
         return "No finance news found for that date."
+
     bullets = []
-    for _, row in df.head(60).iterrows():  # cap to keep prompt light
+    for _, row in df.head(60).iterrows():  # cap to keep the prompt light
         src = row.get("source") or row.get("publisher") or ""
         bullets.append(f"- {row['title']} ({src})")
     evidence = "\n".join(bullets)
@@ -219,7 +211,11 @@ def gpt_daily_summary(df: pd.DataFrame, date_local: datetime, model: str) -> str
     except Exception:
         return "(OpenAI SDK not installed)"
 
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return "(OPENAI_API_KEY not set)"
+
+    client = OpenAI(api_key=api_key)
 
     prompt = f"""
 You are a markets editor. Based ONLY on the bullet list of headlines below,
@@ -235,11 +231,8 @@ Headlines:
 """
     try:
         resp = client.responses.create(model=model, input=prompt)
-        try:
-            return resp.output_text.strip()
-        except Exception:
-            # fallback for older SDKs
-            return resp.output[0].content[0].text.strip()
+        # Latest SDK: resp.output_text; older SDKs: nested list
+        return getattr(resp, "output_text", None) or resp.output[0].content[0].text
     except Exception as e:
         return f"(GPT summary failed: {e})"
 
@@ -252,163 +245,55 @@ def rss_vs_ml_confusion(df: pd.DataFrame) -> pd.DataFrame:
     return pivot
 
 
-# ----------------- CLASS API -----------------
+# ----------------- MAIN ENTRY (NO CLASS) -----------------
 
-@dataclass
-class DigestResult:
-    date_local: datetime
-    df: pd.DataFrame
-    total: int
-    simple_hybrid: str
-    simple_rss: str
-    simple_ml: str
-    gpt_summary: Optional[str]
-    confusion: pd.DataFrame
-    topic_maps: Dict[str, Any]
-
-
-class EconNewsAgent:
+def run(
+    date_str: Optional[str],
+    feeds: List[str],
+    local_tz=None,
+    model: str = "gpt-4o-mini",
+    use_rss_threshold: float = 0.4,
+    max_k: int = 6,
+) -> Tuple[pd.DataFrame, Optional[str]]:
     """
-    Build a daily digest from RSS feeds.
+    Build the digest and return (df, gpt_summary).
 
     Parameters
     ----------
-    feeds : List[str]
-        List of RSS/Atom feed URLs (required).
-    local_tz : tzinfo (from dateutil.tz), optional
-        Local timezone for date filtering; defaults to UTC if None.
-    model : str, optional
-        OpenAI model name for summarization; default "gpt-4o-mini".
-    max_k : int, optional
-        Max K for KMeans clustering; default 6.
-    use_rss_threshold : float, optional
-        If share of items with informative RSS categories >= this threshold,
-        the hybrid display topic prefers RSS categories; default 0.4.
+    date_str : 'YYYY-MM-DD' or None    -> if None, uses today in local_tz
+    feeds    : list of RSS/Atom URLs   -> required
+    local_tz : tzinfo (dateutil.tz)    -> defaults to UTC if None
+    model    : str                      -> OpenAI model for summary
+    use_rss_threshold : float           -> prevalence threshold for RSS topics
+    max_k   : int                      -> max clusters for KMeans
+
+    Returns
+    -------
+    df : pandas.DataFrame
+    gpt_summary : Optional[str]
     """
-    def __init__(
-        self,
-        feeds: List[str],
-        local_tz=None,
-        model: str = "gpt-4o-mini",
-        max_k: int = 6,
-        use_rss_threshold: float = 0.4
-    ):
-        if not feeds or not isinstance(feeds, list):
-            raise ValueError("feeds (list of feed URLs) must be provided.")
-        self.feeds = feeds
-        self.local_tz = local_tz or tz.UTC
-        self.model = model
-        self.max_k = max_k
-        self.use_rss_threshold = use_rss_threshold
+    if not feeds or not isinstance(feeds, list):
+        raise ValueError("feeds (list of feed URLs) must be provided.")
+    local_tz = local_tz or tz.UTC
 
-    def build(self, date_str: Optional[str] = None) -> DigestResult:
-        # resolve date (local)
-        if date_str:
-            target_date_local = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=self.local_tz)
-        else:
-            now_local = datetime.now(tz=self.local_tz)
-            target_date_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Resolve date
+    if date_str:
+        target_date_local = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=local_tz)
+    else:
+        now_local = datetime.now(tz=local_tz)
+        target_date_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # fetch + frame
-        entries = fetch_feed_entries(self.feeds)
-        df = entries_to_dataframe(entries, target_date_local=target_date_local, local_tz=self.local_tz)
-        total = len(df)
+    # Fetch + frame
+    entries = fetch_feed_entries(feeds)
+    df = entries_to_dataframe(entries, target_date_local=target_date_local, local_tz=local_tz)
 
-        # topics
-        df, topic_maps = hybrid_topics(df, max_k=self.max_k, use_rss_threshold=self.use_rss_threshold)
+    # Topics
+    df, _ = hybrid_topics(df, max_k=max_k, use_rss_threshold=use_rss_threshold)
 
-        # summaries
-        simple_hybrid = short_bullet_summary(df, topic_column="topic")
-        simple_rss = short_bullet_summary(df, topic_column="rss_topic")
-        simple_ml = short_bullet_summary(df, topic_column="ml_topic")
+    # GPT summary
+    gpt = gpt_daily_summary(df, date_local=target_date_local, model=model)
 
-        # GPT summary (optional)
-        gpt = None
-        if os.getenv("OPENAI_API_KEY"):
-            gpt = gpt_daily_summary(df, date_local=target_date_local, model=self.model)
-
-        # confusion table
-        cm = rss_vs_ml_confusion(df)
-
-        return DigestResult(
-            date_local=target_date_local,
-            df=df,
-            total=total,
-            simple_hybrid=simple_hybrid,
-            simple_rss=simple_rss,
-            simple_ml=simple_ml,
-            gpt_summary=gpt,
-            confusion=cm,
-            topic_maps=topic_maps
-        )
-
-    # ------- pretty printers / utilities you can call separately -------
-
-    def print_overviews(self, res: DigestResult):
-        print(f"\nDate (local): {res.date_local.date()} | Items: {res.total}")
-        print("\n== Hybrid overview (topic) ==\n" + res.simple_hybrid)
-        print("\n== RSS overview (rss_topic) ==\n" + res.simple_rss)
-        print("\n== ML overview (ml_topic) ==\n" + res.simple_ml)
-        if res.gpt_summary:
-            print("\n== GPT daily wrap ==\n" + (res.gpt_summary or ""))
-
-    def print_rows(self, res: DigestResult, limit: int = 20):
-        if res.total == 0:
-            print("(No rows)")
-            return
-        view_cols = [
-            "published_local", "title", "source",
-            "rss_topic", "rss_topic_count",
-            "ml_topic", "ml_topic_count", "ml_strength",
-            "topic", "link"
-        ]
-        print(f"\n== Data (first {min(limit, res.total)} rows) ==\n")
-        print(res.df[view_cols].head(limit).to_string(index=False))
-
-    def print_confusion(self, res: DigestResult):
-        if res.confusion.empty:
-            print("(No confusion table — not enough data)")
-        else:
-            print("\n== RSS vs ML confusion table ==\n")
-            print(res.confusion.to_string())
-
-    def to_csv(self, res: DigestResult, path: str):
-        res.df.to_csv(path, index=False)
-
-
-# ----------------- CLI (optional) -----------------
-
-def _cli():
-    import argparse
-    ap = argparse.ArgumentParser(description="Build an economics/finance RSS daily digest.")
-    ap.add_argument("--date", help="Target date in YYYY-MM-DD (local tz). Default: today.")
-    ap.add_argument(
-        "--feed",
-        action="append",
-        help="RSS/Atom feed URL (can be passed multiple times). Example: --feed https://www.yahoo.com/news/rss/finance",
-    )
-    ap.add_argument("--tz", default="UTC", help="IANA timezone string (e.g., America/Toronto). Default: UTC.")
-    ap.add_argument("--model", default="gpt-4o-mini", help="OpenAI model name. Default: gpt-4o-mini.")
-    ap.add_argument("--max-k", type=int, default=6, help="Max K for KMeans. Default: 6.")
-    ap.add_argument("--use-rss-threshold", type=float, default=0.4, help="RSS prevalence threshold. Default: 0.4.")
-    args = ap.parse_args()
-
-    if not args.feed:
-        raise SystemExit("Error: at least one --feed must be provided.")
-
-    local_tz = tz.gettz(args.tz)
-    agent = EconNewsAgent(
-        feeds=args.feed,
-        local_tz=local_tz,
-        model=args.model,
-        max_k=args.max_k,
-        use_rss_threshold=args.use_rss_threshold,
-    )
-    res = agent.build(args.date)
-    agent.print_overviews(res)
-    agent.print_rows(res, limit=20)
-    agent.print_confusion(res)
-
+    return df, gpt
 
 if __name__ == "__main__":
     _cli()
