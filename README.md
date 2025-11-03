@@ -10,8 +10,6 @@ I’m looking for a **compromise solution** — a short, smart summary that high
 A great weekly example is [John Hancock Investments’ Weekly Market Recap](https://www.jhinvestments.com/weekly-market-recap#market-moving-news).  
 My goal is to build a shorter **daily version** of a similar recap.
 
----
-
 ## 🎯 Project Goals
 
 This repository contains **Google Colab notebooks** used in early trials to verify that the following tasks are feasible:
@@ -19,16 +17,14 @@ This repository contains **Google Colab notebooks** used in early trials to veri
 1. **Parsing news pages** from major financial sources  
 2. **Identifying key daily topics** and grouping related articles using GPT-based algorithms  
 
----
-
 ## 🧠 Future Plans
 
 Eventually, the project will:
 - Collect and store parsed news in an SQL database in real time  
 - Summarize and categorize economic headlines automatically  
-- Provide daily digests  
-## ⚙️ Current Stage
+- Provide daily digests
 
+## ⚙️ Current Stage
 - Environment: Google Colab  
 - Version control: GitHub  
 - Next step: Transition to AWS for automated real-time parsing and data storage
