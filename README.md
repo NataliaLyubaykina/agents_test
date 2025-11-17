@@ -4,7 +4,7 @@ News agencies like Reuters, Yahoo Finance, and others publish dozens of economic
 - those who spend lots of time reading financial news,
 - those who do not read any,
 - those who skim headlines or social media and get hype instead of facts,
-- and those who read deep technical threads (Slack, Twitter, Substack, etc.) but miss the general economic picture.
+- those who read deep technical threads (Slack, Twitter, etc.) but miss the general economic picture.
 
 At the same time, investing itself has become a trend, which means it’s easy to drown in noise, scattered opinions, and hype cycles. I want a simple way to stay in touch with the **overall economic situation** without getting lost in details.
 
