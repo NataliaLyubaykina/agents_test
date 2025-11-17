@@ -1,14 +1,20 @@
 # 📰 Lazy Economical News Reader
 
-News agencies like Reuters, Yahoo Finance, and others publish dozens of economic articles every day.  
-To stay up to date, readers have to scroll constantly and go through long summaries, which means there are usually two types of people:
-- Those who spend lots of time reading financial news
-- Those who do not read any
+News agencies like Reuters, Yahoo Finance, and others publish dozens of economic articles every day. To stay up to date, readers usually fall into a few types:
+- those who spend lots of time reading financial news,
+- those who do not read any,
+- those who skim headlines or social media and get hype instead of facts,
+- and those who read deep technical threads (Slack, Twitter, Substack, etc.) but miss the general economic picture.
 
-I’m looking for a **compromise solution** — a short, smart summary that highlights **only the key economic areas and major events** that made the headlines each day (or week).
+At the same time, investing itself has become a trend, which means it’s easy to drown in noise, scattered opinions, and hype cycles. I want a simple way to stay in touch with the **overall economic situation** without getting lost in details.
 
-A great weekly example is [John Hancock Investments’ Weekly Market Recap](https://www.jhinvestments.com/weekly-market-recap#market-moving-news).  
-My goal is to build a shorter **daily version** of a similar recap.
+The aim of this project is to create a short, structured view of what actually matters:
+
+1. **Key economic indicators** — a small set of signals describing the state of the economy.
+2. **Industry trends** — sectors move in cycles; tracking them helps understand both opportunities and concentration risks.
+3. **Daily news digest** — a compact summary of the major economic events of the day.
+
+A useful weekly example is the [John Hancock Investments’ Weekly Market Recap](https://www.jhinvestments.com/weekly-market-recap#market-moving-news), but my goal is broader and less detailed: a personal system that provides a clearer, day-to-day economic overview and filters out unnecessary noise.
 
 ## 🎯 Project Goals
 
